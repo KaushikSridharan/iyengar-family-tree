@@ -1,28 +1,27 @@
 {
-  "id": "/",
   "name": "Iyengar Family Tree",
   "short_name": "Iyengar Tree",
   "description": "Read-only, offline-capable family tree viewer with focus navigation, search, and connection finder.",
-  "start_url": "/",
-  "scope": "/",
+  "start_url": "./",
+  "scope": "./",
   "display": "standalone",
   "theme_color": "#FAF8F4",
   "background_color": "#FAF8F4",
   "icons": [
     {
-      "src": "/pwa-192x192.png",
+      "src": "./pwa-192x192.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/pwa-512x512.png",
+      "src": "./pwa-512x512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/pwa-maskable-512x512.png",
+      "src": "./pwa-maskable-512x512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"

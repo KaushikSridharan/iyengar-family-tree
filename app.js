@@ -880,8 +880,8 @@ function renderRelativeRow(person, note, onPick) {
 function renderPersonDetailsContent(family, layoutClass, onClose) {
   const { person } = family;
   const isLiving = !person.died;
-  const bornDisplay = formatDateForDetails(person.born, isLiving);
-  const diedDisplay = formatDateForDetails(person.died, false);
+  const bornDisplay = formatDateForDetails(person.born);
+  const diedDisplay = formatDateForDetails(person.died);
   const currentLocation = person.location || person.residence;
   const whoId = getValidWhoAmI();
   const relText = getRelationshipToViewer(state.graph, whoId, person.id, state.kinshipVocab);
@@ -1032,8 +1032,8 @@ function renderPersonDetailsContent(family, layoutClass, onClose) {
     .filter((u) => u.spouse)
     .map((u) => ({
       spouse: u.spouse,
-      married: u.union?.married ? formatDateForDetails(u.union.married, false) : '',
-      ended: u.union?.ended ? formatDateForDetails(u.union.ended, false) : '',
+      married: u.union?.married ? formatDateForDetails(u.union.married) : '',
+      ended: u.union?.ended ? formatDateForDetails(u.union.ended) : '',
     }));
 
   if (spouses.length > 0) {
@@ -1676,7 +1676,7 @@ function render() {
 
   const validWhoId = getValidWhoAmI();
   const lastUpdatedText = state.graph.lastUpdated
-    ? formatDateForDetails(state.graph.lastUpdated, false)
+    ? formatDateForDetails(state.graph.lastUpdated)
     : '';
 
   const shell = el('div', { className: 'app-shell' });

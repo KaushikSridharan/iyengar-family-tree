@@ -1,6 +1,6 @@
-const SHELL_CACHE = 'family-tree-shell-v14';
-const DATA_CACHE = 'family-tree-data-v14';
-const PHOTO_CACHE = 'family-tree-photos-v14';
+const SHELL_CACHE = 'family-tree-shell-v16';
+const DATA_CACHE = 'family-tree-data-v16';
+const PHOTO_CACHE = 'family-tree-photos-v16';
 
 const SHELL_ASSETS = [
   './',
@@ -20,9 +20,11 @@ const SHELL_ASSETS = [
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(SHELL_CACHE).then((cache) => cache.addAll(SHELL_ASSETS)).catch(() => {})
+    caches
+      .open(SHELL_CACHE)
+      .then((cache) => Promise.all(SHELL_ASSETS.map((asset) => cache.add(asset).catch(() => {}))))
+      .then(() => self.skipWaiting())
   );
-  self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
@@ -56,7 +58,9 @@ async function networkFirst(request, cacheName) {
     if (cached) return cached;
     if (request.mode === 'navigate') {
       const shell = await caches.open(SHELL_CACHE);
-      const fallback = await shell.match(new URL('./index.html', self.location).href);
+      const fallback =
+        (await shell.match(new URL('./', self.location).href)) ||
+        (await shell.match(new URL('./index.html', self.location).href));
       if (fallback) return fallback;
     }
     throw err;
