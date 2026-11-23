@@ -29,7 +29,6 @@ const state = {
   kinshipVocab: safeGetItem(KINSHIP_VOCAB_KEY) === 'marathi' ? 'marathi' : 'english',
   route: null,
   missingNotice: null,
-  historyDepth: 0,
   detailsSheetOpen: false,
   phoneSearchOpen: false,
   overviewOpen: false,
@@ -244,38 +243,90 @@ function syncRouteFromHash() {
   window.history.replaceState(null, '', `#/${fallback}`);
 }
 
+// Overlays (details sheet, phone search, overview, photo, connection finder) each own one browser
+// history entry tagged `{ overlayDepth }`, so the phone back gesture closes the top overlay instead of
+// leaving the app. Moving between people replaces the current entry, so history never fills with people.
+const overlayClosers = [];
+// Person to focus once open overlays have been unwound through history.
+let pendingFocusId = null;
+
+// Opens an overlay: applies `open`, records `close` for the back gesture, and pushes a history entry.
+function openOverlay(open, close, url = window.location.href) {
+  open();
+  overlayClosers.push(close);
+  window.history.pushState({ overlayDepth: overlayClosers.length }, '', url);
+  render();
+}
+
+// Swaps the top overlay for another one, reusing its history entry.
+function replaceTopOverlay(open, close, url) {
+  overlayClosers[overlayClosers.length - 1]();
+  overlayClosers[overlayClosers.length - 1] = close;
+  open();
+  window.history.replaceState({ overlayDepth: overlayClosers.length }, '', url);
+  render();
+}
+
+// Closes the top overlay from a UI control. Goes through history so the overlay's entry is consumed;
+// the popstate handler runs the closer.
+function closeOverlay() {
+  if (overlayClosers.length > 0) window.history.back();
+}
+
+// Back/forward handler: closes overlays above the entry landed on, then applies any pending focus.
+function handlePopState(event) {
+  const depth = event.state?.overlayDepth || 0;
+  while (overlayClosers.length > depth) overlayClosers.pop()();
+  if (pendingFocusId && overlayClosers.length === 0) {
+    const id = pendingFocusId;
+    pendingFocusId = null;
+    applyFocus(id);
+    return;
+  }
+  syncRouteFromHash();
+  render();
+}
+
+// Focuses a person in place: the URL changes for sharing, but no history entry is added.
+function applyFocus(personId) {
+  state.route = { kind: 'focus', personId };
+  window.history.replaceState(null, '', `#/${personId}`);
+  render();
+}
+
+// Focuses a person. Open overlays are unwound first so their history entries do not linger.
 function navigateFocus(personId) {
   if (!state.graph || !state.graph.peopleById.has(personId)) return;
   state.missingNotice = null;
   state.keyboardPrompt = null;
-  const nextHash = `#/${personId}`;
-  if (window.location.hash !== nextHash) {
-    window.location.hash = nextHash;
-    state.historyDepth += 1;
-  } else {
-    state.route = { kind: 'focus', personId };
-    render();
+  if (overlayClosers.length > 0) {
+    pendingFocusId = personId;
+    window.history.go(-overlayClosers.length);
+    return;
   }
+  applyFocus(personId);
 }
 
+// Shows the connection finder. From the tree it opens as an overlay; from the details sheet it takes
+// over the sheet's history entry; inside the finder (or from a shared link) it replaces the URL in place.
 function navigateConnect(fromId, toId) {
   if (!state.graph || !state.graph.peopleById.has(fromId) || !state.graph.peopleById.has(toId)) return;
   state.missingNotice = null;
   state.connectVisibleCount = 5;
-  const nextHash = `#/connect/${fromId}/${toId}`;
-  if (window.location.hash !== nextHash) {
-    window.location.hash = nextHash;
-    state.historyDepth += 1;
-  } else {
+  const url = `#/connect/${fromId}/${toId}`;
+  const open = () => {
     state.route = { kind: 'connect', fromId, toId };
+  };
+  // Closing the finder needs no state change: the URL reverts and popstate re-syncs the route.
+  const close = () => {};
+  if (state.route?.kind === 'connect') {
+    open();
+    window.history.replaceState(window.history.state, '', url);
     render();
-  }
-}
-
-function goBack() {
-  if (state.historyDepth > 0 || window.history.length > 1) {
-    window.history.back();
-    state.historyDepth = Math.max(0, state.historyDepth - 1);
+  } else if (state.detailsSheetOpen && overlayClosers.length > 0) {
+    replaceTopOverlay(open, close, url);
+  } else {
+    openOverlay(open, close, url);
   }
 }
 
@@ -292,7 +343,6 @@ function setWhoAmI(personId) {
 
 function openConnectFromDetails(targetId) {
   const viewerId = getValidWhoAmI() || state.graph.defaultStartId;
-  state.detailsSheetOpen = false;
   navigateConnect(viewerId, targetId);
 }
 
@@ -379,8 +429,10 @@ function createPersonNode({
 // shows details in the sidebar, so the tap does nothing there.
 function openDetailsForFocused() {
   if (getViewportInfo().layoutClass !== 'desktop') {
-    state.detailsSheetOpen = true;
-    render();
+    openOverlay(
+      () => { state.detailsSheetOpen = true; },
+      () => { state.detailsSheetOpen = false; }
+    );
   }
 }
 
@@ -884,8 +936,10 @@ function renderPersonDetailsContent(family, layoutClass, onClose) {
       'aria-label': `View larger photo of ${person.name}`,
       onclick: () => {
         if (!imgEl || !imgEl.isConnected) return;
-        state.photoPreview = { src: detailSrc, name: person.fullName || person.name };
-        render();
+        openOverlay(
+          () => { state.photoPreview = { src: detailSrc, name: person.fullName || person.name }; },
+          () => { state.photoPreview = null; }
+        );
       },
     }, [avatarNode]);
     if (imgEl) {
@@ -954,10 +1008,7 @@ function renderPersonDetailsContent(family, layoutClass, onClose) {
         type: 'button',
         className: 'btn btn-primary btn-sm',
         textContent: UI_STRINGS.viewFamily,
-        onclick: () => {
-          state.detailsSheetOpen = false;
-          navigateFocus(person.id);
-        },
+        onclick: () => navigateFocus(person.id),
       })
     );
   }
@@ -1254,10 +1305,7 @@ function renderPhoneSearchModal() {
         className: 'btn btn-ghost',
         style: { color: 'var(--accent-forest)' },
         textContent: UI_STRINGS.close,
-        onclick: () => {
-          state.phoneSearchOpen = false;
-          render();
-        },
+        onclick: closeOverlay,
       }),
     ])
   );
@@ -1373,7 +1421,7 @@ function renderConnectionFinder(fromId, toId, viewport) {
         type: 'button',
         className: 'btn btn-ghost',
         'aria-label': UI_STRINGS.close,
-        onclick: () => navigateFocus(toId),
+        onclick: () => (overlayClosers.length > 0 ? closeOverlay() : navigateFocus(toId)),
       }, [svgIcon(ICONS.close, 20)]),
     ])
   );
@@ -1613,7 +1661,7 @@ function renderOverviewModal(focusedId) {
         zoomLabel,
         el('button', { type: 'button', className: 'btn btn-outline', textContent: '+', 'aria-label': 'Zoom in', onclick: () => { state.overviewScale = Math.min(1.6, Number((state.overviewScale + 0.15).toFixed(2))); applyTransform(); } }),
         el('button', { type: 'button', className: 'btn btn-outline', textContent: 'Reset', onclick: () => { state.overviewScale = 0.95; state.overviewOffset = { x: 0, y: 0 }; applyTransform(); } }),
-        el('button', { type: 'button', className: 'btn btn-ghost', 'aria-label': UI_STRINGS.close, onclick: () => { state.overviewOpen = false; render(); } }, [svgIcon(ICONS.close, 20)]),
+        el('button', { type: 'button', className: 'btn btn-ghost', 'aria-label': UI_STRINGS.close, onclick: closeOverlay }, [svgIcon(ICONS.close, 20)]),
       ]),
     ])
   );
@@ -1674,8 +1722,10 @@ function render() {
         type: 'button',
         className: 'btn btn-ghost',
         onclick: () => {
-          state.overviewOpen = true;
-          render();
+          openOverlay(
+            () => { state.overviewOpen = true; },
+            () => { state.overviewOpen = false; }
+          );
         },
       }, [svgIcon(ICONS.compass, 16), el('span', { textContent: UI_STRINGS.overviewButton })])
     );
@@ -1687,8 +1737,7 @@ function render() {
         type: 'button',
         className: 'btn btn-primary',
         onclick: () => {
-          state.detailsSheetOpen = true;
-          render();
+          openDetailsForFocused();
         },
       }, [svgIcon(ICONS.info, 16), el('span', { textContent: UI_STRINGS.details })])
     );
@@ -1698,14 +1747,6 @@ function render() {
     el('header', { className: 'topbar' }, [
       el('div', { className: 'topbar-inner' }, [
         el('div', { className: 'topbar-left' }, [
-          state.historyDepth > 0
-            ? el('button', {
-                type: 'button',
-                className: 'btn btn-ghost',
-                'aria-label': UI_STRINGS.back,
-                onclick: goBack,
-              }, [svgIcon(ICONS.back, 18)])
-            : null,
           el('button', {
             type: 'button',
             className: 'btn btn-ghost',
@@ -1773,16 +1814,17 @@ function render() {
             type: 'button',
             className: 'phone-search-trigger',
             onclick: () => {
-              state.phoneSearchOpen = true;
-              render();
+              openOverlay(
+                () => { state.phoneSearchOpen = true; },
+                () => { state.phoneSearchOpen = false; }
+              );
             },
           }, [svgIcon(ICONS.search, 18), el('span', { textContent: UI_STRINGS.searchPlaceholder })]),
           el('button', {
             type: 'button',
             className: 'btn btn-primary',
             onclick: () => {
-              state.detailsSheetOpen = true;
-              render();
+              openDetailsForFocused();
             },
           }, [svgIcon(ICONS.info, 16), el('span', { textContent: UI_STRINGS.details })]),
         ]),
@@ -1799,8 +1841,7 @@ function render() {
       'aria-label': family.person.name,
       onclick: (e) => {
         if (e.target === backdrop) {
-          state.detailsSheetOpen = false;
-          render();
+          closeOverlay();
         }
       },
     });
@@ -1812,8 +1853,7 @@ function render() {
               className: 'btn btn-ghost',
               style: { paddingLeft: '6px' },
               onclick: () => {
-                state.detailsSheetOpen = false;
-                render();
+                closeOverlay();
               },
             }, [svgIcon(ICONS.back, 18), el('span', { textContent: 'Tree' })])
           : el('span', { className: 'tier-label', style: { paddingLeft: '6px' }, textContent: UI_STRINGS.details }),
@@ -1822,16 +1862,12 @@ function render() {
           className: 'btn btn-ghost',
           'aria-label': UI_STRINGS.close,
           onclick: () => {
-            state.detailsSheetOpen = false;
-            render();
+            closeOverlay();
           },
         }, [svgIcon(ICONS.close, 20)]),
       ]),
       el('div', { style: { flex: '1', overflowY: 'auto' } }, [
-        renderPersonDetailsContent(family, viewport.layoutClass, () => {
-          state.detailsSheetOpen = false;
-          render();
-        }),
+        renderPersonDetailsContent(family, viewport.layoutClass, closeOverlay),
       ]),
     ]);
     backdrop.appendChild(sheet);
@@ -1852,8 +1888,7 @@ function render() {
       'aria-label': state.photoPreview.name,
       onclick: (e) => {
         if (e.target === lightbox) {
-          state.photoPreview = null;
-          render();
+          closeOverlay();
         }
       },
     }, [
@@ -1862,8 +1897,7 @@ function render() {
         className: 'photo-lightbox-close',
         'aria-label': UI_STRINGS.close,
         onclick: () => {
-          state.photoPreview = null;
-          render();
+          closeOverlay();
         },
       }, [svgIcon(ICONS.close, 20)]),
       el('img', {
@@ -1938,6 +1972,11 @@ async function loadTree() {
 }
 
 function setupEvents() {
+  // A reload drops the overlay stack, so an overlay entry left in history no longer means anything.
+  if (window.history.state?.overlayDepth) window.history.replaceState(null, '', window.location.href);
+
+  window.addEventListener('popstate', handlePopState);
+  // Covers hash edits typed into the address bar.
   window.addEventListener('hashchange', () => {
     syncRouteFromHash();
     render();
@@ -1977,8 +2016,10 @@ function setupEvents() {
     if (e.key === '/' && !typing) {
       e.preventDefault();
       if (getViewportInfo().layoutClass === 'phone') {
-        state.phoneSearchOpen = true;
-        render();
+        openOverlay(
+          () => { state.phoneSearchOpen = true; },
+          () => { state.phoneSearchOpen = false; }
+        );
       } else {
         document.getElementById('desktop-search-input')?.focus();
       }
@@ -1987,8 +2028,7 @@ function setupEvents() {
 
     if (e.key === 'Escape' && state.photoPreview) {
       e.preventDefault();
-      state.photoPreview = null;
-      render();
+      closeOverlay();
       return;
     }
 
@@ -2010,12 +2050,6 @@ function setupEvents() {
         navigateFocus(state.keyboardPrompt.choices[num - 1].id);
         return;
       }
-    }
-
-    if (e.key === 'Backspace' || (e.altKey && e.key === 'ArrowLeft')) {
-      e.preventDefault();
-      goBack();
-      return;
     }
 
     if (e.key === 'ArrowUp') {

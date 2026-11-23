@@ -1,5 +1,6 @@
 {
   "title": "Iyengar Family Tree",
+  "defaultStartId": "p1",
   "lastUpdated": "2026-11-23",
   "people": {
     "p1": {
@@ -11,6 +12,26 @@
       "birthplace": "Bellur, Karnataka",
       "location": "Pune, Maharashtra",
       "photo": "p1-b-k-s-iyengar.webp"
+    },
+    "p10": {
+      "name": "Parthasarathy",
+      "fullName": "K. V. Parthasarathy",
+      "gender": "m",
+      "died": "2012",
+      "location": "Pune, Maharashtra"
+    },
+    "p11": {
+      "name": "Sridhar",
+      "fullName": "R. S. Sridhar",
+      "gender": "m",
+      "died": "2022"
+    },
+    "p12": {
+      "name": "Raghu",
+      "fullName": "B. Raghu",
+      "gender": "m",
+      "died": "2023",
+      "location": "Bangalore, Karnataka"
     },
     "p2": {
       "name": "Ramamani",
@@ -92,6 +113,15 @@
         "p2",
         "p1"
       ]
+    },
+    "p9": {
+      "name": "Sridharan",
+      "fullName": "G. Sridharan",
+      "gender": "m",
+      "born": "1943-07-13",
+      "died": "2013-12-13",
+      "birthplace": "Tamilnadu",
+      "location": "Pune, Maharashtra"
     }
   },
   "unions": [
@@ -101,6 +131,31 @@
         "p1"
       ],
       "married": "1943"
+    },
+    {
+      "partners": [
+        "p9",
+        "p4"
+      ],
+      "married": "1972"
+    },
+    {
+      "partners": [
+        "p10",
+        "p6"
+      ]
+    },
+    {
+      "partners": [
+        "p11",
+        "p7"
+      ]
+    },
+    {
+      "partners": [
+        "p12",
+        "p8"
+      ]
     }
   ]
 }

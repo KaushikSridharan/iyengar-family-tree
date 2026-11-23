@@ -21,7 +21,7 @@ The site runs directly from plain static files (`index.html`, `styles.css`, `app
 
 ## Data Format (`tree.json`)
 
-- `defaultStartId` — Optional person ID shown first when a visitor skips "Who am I?".
+- `defaultStartId` — Optional person ID shown first to visitors who have not marked themselves with "This is me".
 - `lastUpdated` — ISO date (`YYYY-MM-DD`) displayed in the app.
 - `people` — Object keyed by stable lowercase ID (`p01`, `p18`, etc.).
   - Required: `name`
