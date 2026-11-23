@@ -1,6 +1,6 @@
-const SHELL_CACHE = 'family-tree-shell-v11';
-const DATA_CACHE = 'family-tree-data-v11';
-const PHOTO_CACHE = 'family-tree-photos-v11';
+const SHELL_CACHE = 'family-tree-shell-v13';
+const DATA_CACHE = 'family-tree-data-v13';
+const PHOTO_CACHE = 'family-tree-photos-v13';
 
 const SHELL_ASSETS = [
   './',

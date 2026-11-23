@@ -589,7 +589,8 @@ button {
 }
 
 .person-card.is-focused {
-  width: 212px;
+  position: relative;
+  width: 228px;
   min-height: 64px;
   padding: 10px 14px;
   border-width: 2px;
@@ -716,15 +717,20 @@ button {
 }
 
 .focus-info-badge {
+  position: absolute;
+  top: -8px;
+  right: -8px;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: 10px;
-  background: var(--accent-forest-soft);
-  color: var(--accent-forest);
-  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  border: 2px solid var(--bg-canvas);
+  background: var(--accent-forest);
+  color: #FFFFFF;
+  box-shadow: 0 2px 6px rgba(28, 25, 23, 0.14);
+  pointer-events: none;
 }
 
 @media (min-width: 1024px) {

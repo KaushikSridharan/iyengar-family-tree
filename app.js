@@ -27,6 +27,7 @@ const state = {
   detailsSheetOpen: false,
   phoneSearchOpen: false,
   overviewOpen: false,
+  installGuideOpen: false,
   photoPreview: null,
   keyboardPrompt: null,
   isOnline: typeof navigator !== 'undefined' ? navigator.onLine : true,
@@ -132,6 +133,7 @@ const ICONS = {
   wifiOff: ['M2 2l20 20', 'M8.5 16.5a5 5 0 0 1 7 0', 'M5 13a10 10 0 0 1 5.17-2.69', 'M10.71 5.05A16 16 0 0 1 22.58 9', 'M1.42 9a16 16 0 0 1 4.7-2.88', 'M12 20h.01'],
   refresh: ['M3 12a9 9 0 0 1 15-6.7L21 8', 'M21 3v5h-5', 'M21 12a9 9 0 0 1-15 6.7L3 16', 'M8 16H3v5'],
   check: 'M20 6 9 17l-5-5',
+  share: ['M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8', 'M16 6l-4-4-4 4', 'M12 2v13'],
 };
 
 function createSilhouetteSvg() {
@@ -368,7 +370,7 @@ function createPersonNode({
             ])
           : null,
       ]),
-      isFocused ? el('span', { className: 'focus-info-badge', 'aria-hidden': 'true' }, [svgIcon(ICONS.info, 16)]) : null,
+      isFocused ? el('span', { className: 'focus-info-badge', 'aria-hidden': 'true' }, [svgIcon(ICONS.info, 13)]) : null,
     ]
   );
 
@@ -1642,6 +1644,103 @@ function renderOverviewModal(focusedId) {
   return modal;
 }
 
+function renderInstallGuideModal() {
+  const isInFrame = (() => {
+    try {
+      return window.self !== window.top;
+    } catch {
+      return true;
+    }
+  })();
+
+  const close = () => {
+    state.installGuideOpen = false;
+    render();
+  };
+
+  const backdrop = el('div', {
+    className: 'modal-backdrop',
+    role: 'dialog',
+    'aria-modal': 'true',
+    'aria-labelledby': 'install-guide-title',
+    onclick: (e) => {
+      if (e.target === backdrop) close();
+    },
+  });
+
+  const steps = [];
+  if (isInFrame) {
+    steps.push(
+      el('p', { style: { margin: '0', fontSize: '14px', color: 'var(--text-ink)', lineHeight: '1.55' } }, [
+        'This page is currently open inside a preview frame. Open its direct link in Safari (iPhone/iPad) or Chrome (Android) first, then add it to your Home Screen.',
+      ])
+    );
+  } else if (state.isIOS) {
+    steps.push(
+      el('ol', { style: { margin: '0', paddingLeft: '20px', display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '15px', lineHeight: '1.5' } }, [
+        el('li', {}, [
+          'Open this page in ',
+          el('strong', { textContent: 'Safari' }),
+          ' (if you are in an in-app browser, choose Open in Safari).',
+        ]),
+        el('li', {}, [
+          'Tap the ',
+          el('strong', { textContent: 'Share' }),
+          ' button ',
+          svgIcon(ICONS.share, 15),
+          ' in the Safari toolbar.',
+        ]),
+        el('li', {}, [
+          'Scroll down and tap ',
+          el('strong', { textContent: 'Add to Home Screen' }),
+          '.',
+        ]),
+      ])
+    );
+  } else {
+    steps.push(
+      el('ol', { style: { margin: '0', paddingLeft: '20px', display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '15px', lineHeight: '1.5' } }, [
+        el('li', {}, [
+          'Open this page in your main browser (such as ',
+          el('strong', { textContent: 'Chrome' }),
+          ' or ',
+          el('strong', { textContent: 'Samsung Internet' }),
+          ', rather than an in-app viewer).',
+        ]),
+        el('li', {}, [
+          'Tap the browser menu button (',
+          el('strong', { textContent: '⋮' }),
+          ' or ',
+          el('strong', { textContent: '⋯' }),
+          ').',
+        ]),
+        el('li', {}, [
+          'Choose ',
+          el('strong', { textContent: 'Install app' }),
+          ' or ',
+          el('strong', { textContent: 'Add to Home screen' }),
+          '.',
+        ]),
+      ])
+    );
+  }
+
+  const card = el('div', { className: 'modal-card' }, [
+    el('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 20px', borderBottom: '1px solid var(--border-hairline)' } }, [
+      el('h2', { id: 'install-guide-title', style: { margin: '0', fontFamily: 'var(--font-display)', fontSize: '20px', fontWeight: '600' }, textContent: UI_STRINGS.installApp }),
+      el('button', { type: 'button', className: 'btn btn-ghost', 'aria-label': UI_STRINGS.close, onclick: close }, [svgIcon(ICONS.close, 20)]),
+    ]),
+    el('div', { style: { padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px' } }, [
+      el('p', { style: { margin: '0', fontSize: '14px', color: 'var(--text-secondary)' }, textContent: UI_STRINGS.installHintAndroid }),
+      ...steps,
+      el('button', { type: 'button', className: 'btn btn-primary', style: { marginTop: '6px', width: '100%' }, textContent: UI_STRINGS.close, onclick: close }),
+    ]),
+  ]);
+
+  backdrop.appendChild(card);
+  return backdrop;
+}
+
 function render() {
   const root = document.getElementById('app');
   if (!root) return;
@@ -1715,21 +1814,28 @@ function render() {
     );
   }
 
-  if (!state.isInstalled && state.deferredPrompt) {
+  if (!state.isInstalled && (state.deferredPrompt || state.isIOS || viewport.layoutClass !== 'desktop')) {
+    const isPhone = viewport.layoutClass === 'phone';
     topActions.push(
       el('button', {
         type: 'button',
-        className: 'btn btn-primary',
+        className: isPhone ? 'btn btn-soft btn-sm' : 'btn btn-primary',
+        'aria-label': UI_STRINGS.installApp,
         onclick: async () => {
-          await state.deferredPrompt.prompt();
-          const res = await state.deferredPrompt.userChoice;
-          if (res.outcome === 'accepted') {
-            state.isInstalled = true;
-            state.deferredPrompt = null;
+          if (state.deferredPrompt) {
+            await state.deferredPrompt.prompt();
+            const res = await state.deferredPrompt.userChoice;
+            if (res.outcome === 'accepted') {
+              state.isInstalled = true;
+              state.deferredPrompt = null;
+            }
+            render();
+          } else {
+            state.installGuideOpen = true;
+            render();
           }
-          render();
         },
-      }, [svgIcon(ICONS.download, 16), el('span', { textContent: UI_STRINGS.installApp })])
+      }, [svgIcon(ICONS.download, isPhone ? 15 : 16), el('span', { textContent: isPhone ? 'Install' : UI_STRINGS.installApp })])
     );
   }
 
@@ -1883,6 +1989,7 @@ function render() {
     if (conn) shell.appendChild(conn);
   }
   if (state.overviewOpen) shell.appendChild(renderOverviewModal(focusedId));
+  if (state.installGuideOpen) shell.appendChild(renderInstallGuideModal());
   if (state.photoPreview) {
     const lightbox = el('div', {
       className: 'photo-lightbox-backdrop',
@@ -1919,7 +2026,13 @@ function render() {
   }
 
   // Status Notices
-  if (!state.isOnline || state.updateReady || (!state.isInstalled && !state.hintDismissed && state.deferredPrompt && viewport.layoutClass === 'phone')) {
+  const showPhoneInstallToast =
+    !state.isInstalled &&
+    !state.hintDismissed &&
+    Boolean(state.deferredPrompt) &&
+    viewport.layoutClass === 'phone';
+
+  if (!state.isOnline || state.updateReady || showPhoneInstallToast) {
     const stack = el('div', { className: 'status-stack' });
     if (state.updateReady) {
       stack.appendChild(
@@ -1927,6 +2040,41 @@ function render() {
           svgIcon(ICONS.refresh, 16),
           el('span', { textContent: UI_STRINGS.updateNotice }),
           el('button', { type: 'button', className: 'btn btn-primary', style: { minHeight: '32px', padding: '0 10px', fontSize: '12px' }, textContent: UI_STRINGS.refreshNow, onclick: () => window.location.reload() }),
+        ])
+      );
+    }
+    if (showPhoneInstallToast) {
+      stack.appendChild(
+        el('div', { className: 'status-toast', role: 'status', style: { borderColor: 'var(--accent-forest)' } }, [
+          svgIcon(ICONS.download, 16),
+          el('span', { textContent: UI_STRINGS.installHintAndroid }),
+          el('button', {
+            type: 'button',
+            className: 'btn btn-primary',
+            style: { minHeight: '32px', padding: '0 10px', fontSize: '12px' },
+            textContent: 'Install',
+            onclick: async () => {
+              if (!state.deferredPrompt) return;
+              await state.deferredPrompt.prompt();
+              const res = await state.deferredPrompt.userChoice;
+              if (res.outcome === 'accepted') {
+                state.isInstalled = true;
+                state.deferredPrompt = null;
+              }
+              render();
+            },
+          }),
+          el('button', {
+            type: 'button',
+            className: 'btn btn-ghost',
+            style: { minHeight: '28px', minWidth: '28px', padding: '0 4px' },
+            'aria-label': UI_STRINGS.dismiss,
+            onclick: () => {
+              state.hintDismissed = true;
+              safeSetItem(INSTALL_HINT_DISMISSED_KEY, '1');
+              render();
+            },
+          }, [svgIcon(ICONS.close, 15)]),
         ])
       );
     }
@@ -2007,9 +2155,22 @@ function setupEvents() {
     render();
   });
 
+  const standaloneQuery = window.matchMedia('(display-mode: standalone)');
   state.isInstalled =
-    window.matchMedia('(display-mode: standalone)').matches ||
+    standaloneQuery.matches ||
     window.navigator.standalone === true;
+  if (standaloneQuery.addEventListener) {
+    standaloneQuery.addEventListener('change', (e) => {
+      state.isInstalled = e.matches || window.navigator.standalone === true;
+      render();
+    });
+  }
+
+  const ua = window.navigator.userAgent || '';
+  state.isIOS =
+    /iPhone|iPad|iPod/i.test(ua) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  state.isAndroidChrome = /Android/i.test(ua) && /Chrome/i.test(ua) && !/Edg|OPR|SamsungBrowser/i.test(ua);
 
   window.addEventListener('beforeinstallprompt', (e) => {
     e.preventDefault();
@@ -2019,6 +2180,7 @@ function setupEvents() {
   window.addEventListener('appinstalled', () => {
     state.isInstalled = true;
     state.deferredPrompt = null;
+    state.installGuideOpen = false;
     render();
   });
 
@@ -2046,7 +2208,14 @@ function setupEvents() {
       return;
     }
 
-    if (typing || state.overviewOpen || state.photoPreview || state.route?.kind === 'connect') return;
+    if (e.key === 'Escape' && state.installGuideOpen) {
+      e.preventDefault();
+      state.installGuideOpen = false;
+      render();
+      return;
+    }
+
+    if (typing || state.overviewOpen || state.installGuideOpen || state.photoPreview || state.route?.kind === 'connect') return;
 
     const family = getDerivedFamily(state.graph, getFocusedId());
     if (!family) return;
