@@ -7,7 +7,14 @@ import {
   parentRoleLabel,
   UI_STRINGS,
 } from './lib/format.js';
-import { buildTreeGraph, getDerivedFamily, searchPeople } from './lib/graph.js';
+import {
+  buildTreeGraph,
+  getAncestorLevels,
+  getDerivedFamily,
+  getDescendantLevels,
+  searchPeople,
+  sortByBirthThenName,
+} from './lib/graph.js';
 import { findShortestConnections, getRelationshipToViewer } from './lib/relationships.js';
 
 const WHO_AM_I_KEY = 'family-tree-whoami';
@@ -311,16 +318,12 @@ function createPersonNode({
   person,
   isFocused = false,
   compact = false,
-  showHasParentsHint = false,
   eagerPhoto = false,
   subtitle = '',
-  refKey = '',
-  nodeMap = null,
 }) {
   const whoId = getValidWhoAmI();
   const isSelf = person.id === whoId;
   const years = formatYearsShort(person);
-  const hasParents = Boolean(person.parents && person.parents.length > 0);
 
   const metaParts = [];
   if (years) metaParts.push(years);
@@ -333,17 +336,7 @@ function createPersonNode({
       className: `person-card ${compact ? 'is-compact' : ''} ${isFocused ? 'is-focused' : ''}`,
       'aria-current': isFocused ? 'page' : null,
       'aria-label': `${person.name}${years ? `, ${years}` : ''}${subtitle ? `, ${subtitle}` : ''}${isFocused ? ', currently focused' : ''}`,
-      onclick: () => {
-        if (isFocused) {
-          const { layoutClass } = getViewportInfo();
-          if (layoutClass !== 'desktop') {
-            state.detailsSheetOpen = true;
-            render();
-          }
-        } else {
-          navigateFocus(person.id);
-        }
-      },
+      onclick: () => (isFocused ? openDetailsForFocused() : navigateFocus(person.id)),
     },
     [
       createAvatar(person, compact ? 'sm' : isFocused ? 'lg' : 'md', 'thumb', eagerPhoto || isFocused),
@@ -354,12 +347,6 @@ function createPersonNode({
         ]),
         metaParts.length > 0
           ? el('div', { className: 'person-meta tabular-nums', textContent: metaParts.join(' · ') })
-          : null,
-        showHasParentsHint && hasParents
-          ? el('div', { className: 'spouse-parents-hint' }, [
-              svgIcon(ICONS.branch, 12),
-              el('span', { textContent: UI_STRINGS.spouseParentsHint }),
-            ])
           : null,
       ]),
       isFocused ? el('span', { className: 'focus-info-badge', 'aria-hidden': 'true' }, [svgIcon(ICONS.info, 13)]) : null,
@@ -385,37 +372,184 @@ function createPersonNode({
     );
   }
 
-  if (nodeMap && refKey) {
-    nodeMap.set(refKey, wrap);
-  }
-
   return wrap;
 }
 
-function drawTreeConnectors(container, svg, nodeMap, family, opts) {
-  const cRect = container.getBoundingClientRect();
+// Tapping the focused person opens their details: a sheet on phone and tablet. Desktop already
+// shows details in the sidebar, so the tap does nothing there.
+function openDetailsForFocused() {
+  if (getViewportInfo().layoutClass !== 'desktop') {
+    state.detailsSheetOpen = true;
+    render();
+  }
+}
+
+// Union record between two people, or null when none is recorded.
+function findUnion(aId, bId) {
+  return (state.graph.unionsByPerson.get(aId) || []).find((u) => u.partners.includes(bId)) || null;
+}
+
+// Marker drawn between two partners: an infinity symbol, plus the marriage and end years unless
+// `stacked` (name-only cards have no room for years). Ended unions are faded.
+function createUnionMarker(union, stacked = false) {
+  const ended = Boolean(union && (union.ended || union.status === 'ended' || union.status === 'divorced'));
+  const married = extractYear(union?.married);
+  const endedYear = extractYear(union?.ended);
+  return el('div', { className: `union-marker${ended ? ' is-ended' : ''}${stacked ? ' is-stacked' : ''}`, 'aria-hidden': 'true' }, [
+    el('span', { className: 'union-symbol', textContent: '∞' }),
+    !stacked && married ? el('span', { textContent: married }) : null,
+    !stacked && endedYear ? el('span', { textContent: endedYear }) : null,
+  ]);
+}
+
+// Couple card: two tappable halves joined by a union marker. With `focusLeft`, the left half is the
+// focused person (tapping it opens details) and the right half is their spouse (tapping refocuses).
+// Returns the card and both halves so family lines can land on the correct partner.
+function createCoupleCard({ left, right, union, focusLeft = false, compact = false, eagerPhoto = false }) {
+  const whoId = getValidWhoAmI();
+  const married = extractYear(union?.married);
+
+  const makeHalf = (person, isFocus) => {
+    const years = formatYearsShort(person);
+    // A spouse of the focused person with recorded parents gets a branch icon: their own family is one tap away.
+    const showParentsHint = focusLeft && !isFocus && person.parents?.length > 0;
+    return el(
+      'button',
+      {
+        type: 'button',
+        className: `couple-half${isFocus ? ' is-focused' : ''}`,
+        'aria-current': isFocus ? 'page' : null,
+        'aria-label': `${person.name}${years ? `, ${years}` : ''}${isFocus ? ', currently focused' : ''}`,
+        onclick: () => (isFocus ? openDetailsForFocused() : navigateFocus(person.id)),
+      },
+      [
+        createAvatar(person, 'sm', 'thumb', eagerPhoto || isFocus),
+        el('div', { className: 'person-card-text' }, [
+          el('div', { className: 'person-name-row' }, [
+            el('span', { className: 'person-name', textContent: person.name }),
+            person.id === whoId ? el('span', { className: 'self-tag', textContent: '(You)' }) : null,
+            showParentsHint
+              ? el('span', { className: 'spouse-parents-icon', title: UI_STRINGS.spouseParentsHint }, [svgIcon(ICONS.branch, 12)])
+              : null,
+          ]),
+          years ? el('div', { className: 'person-meta tabular-nums', textContent: years }) : null,
+        ]),
+      ]
+    );
+  };
+
+  const leftHalf = makeHalf(left, focusLeft);
+  const rightHalf = makeHalf(right, false);
+  const card = el(
+    'div',
+    {
+      className: `couple-card${focusLeft ? ' is-focused' : ''}${compact ? ' is-compact' : ''}`,
+      role: 'group',
+      'aria-label': `${left.name} and ${right.name}${married ? `, married ${married}` : ''}`,
+    },
+    [
+      leftHalf,
+      createUnionMarker(union),
+      rightHalf,
+      focusLeft ? el('span', { className: 'focus-info-badge', 'aria-hidden': 'true' }, [svgIcon(ICONS.info, 13)]) : null,
+    ]
+  );
+  return { card, leftHalf, rightHalf };
+}
+
+// Name-only card for generations far from the focus. Dates move to the tooltip.
+function createNameCard(person) {
+  const years = formatYearsShort(person);
+  const label = years ? `${person.name}, ${years}` : person.name;
+  return el('button', {
+    type: 'button',
+    className: 'name-card',
+    title: label,
+    'aria-label': label,
+    textContent: person.name,
+    onclick: () => navigateFocus(person.id),
+  });
+}
+
+// Name-only couple card for distant generations: both names stacked around the union symbol.
+function createNameCoupleCard(left, right, union) {
+  const nameButton = (person) => {
+    const years = formatYearsShort(person);
+    const label = years ? `${person.name}, ${years}` : person.name;
+    return el('button', {
+      type: 'button',
+      className: 'name-couple-name',
+      title: label,
+      'aria-label': label,
+      textContent: person.name,
+      onclick: () => navigateFocus(person.id),
+    });
+  };
+  return el('div', { className: 'name-couple', role: 'group', 'aria-label': `${left.name} and ${right.name}` }, [
+    nameButton(left),
+    createUnionMarker(union, true),
+    nameButton(right),
+  ]);
+}
+
+// Horizontal row holding one generation. It never wraps: when it overflows it scrolls sideways,
+// with edge buttons on devices that have a pointer. `onScroll` lets family lines follow the scroll.
+function createGenerationStrip(children, onScroll, extraClass = '') {
+  const strip = el('div', { className: `gen-strip ${extraClass}`.trim() }, children);
+  const step = (dir) => strip.scrollBy({ left: dir * strip.clientWidth * 0.7, behavior: 'smooth' });
+  const leftBtn = el('button', {
+    type: 'button',
+    className: 'gen-strip-arrow is-left',
+    'aria-label': UI_STRINGS.scrollLeft,
+    hidden: true,
+    onclick: () => step(-1),
+  }, [svgIcon('m15 18-6-6 6-6', 16)]);
+  const rightBtn = el('button', {
+    type: 'button',
+    className: 'gen-strip-arrow is-right',
+    'aria-label': UI_STRINGS.scrollRight,
+    hidden: true,
+    onclick: () => step(1),
+  }, [svgIcon('m9 18 6-6-6-6', 16)]);
+
+  const updateArrows = () => {
+    leftBtn.hidden = strip.scrollLeft <= 2;
+    rightBtn.hidden = strip.scrollLeft + strip.clientWidth >= strip.scrollWidth - 2;
+  };
+  strip.addEventListener('scroll', () => {
+    updateArrows();
+    onScroll();
+  }, { passive: true });
+
+  return { wrap: el('div', { className: 'gen-strip-wrap' }, [strip, leftBtn, rightBtn]), strip, updateArrows };
+}
+
+// Scrolls a strip so `target` is centred, or centres the whole row when there is no target.
+function centerStrip(strip, target) {
+  strip.scrollLeft = target
+    ? target.offsetLeft - (strip.clientWidth - target.offsetWidth) / 2
+    : (strip.scrollWidth - strip.clientWidth) / 2;
+}
+
+// Draws family lines over `canvas`. Each link runs from the bottom centre of its origin to the top
+// centre of each target, through a horizontal bar halfway between. Links hold functions so they can
+// be resolved after every row exists and re-resolved on each redraw.
+function drawFamilyLines(canvas, svg, links) {
+  const cRect = canvas.getBoundingClientRect();
   if (cRect.width === 0 || cRect.height === 0) return;
 
   svg.setAttribute('width', String(cRect.width));
   svg.setAttribute('height', String(cRect.height));
   svg.textContent = '';
 
-  const getBox = (key) => {
-    const elem = nodeMap.get(key);
-    if (!elem) return null;
-    const r = elem.getBoundingClientRect();
+  const boxOf = (node) => {
+    if (!node) return null;
+    const r = node.getBoundingClientRect();
     if (r.width === 0 || r.height === 0) return null;
-    return {
-      left: r.left - cRect.left,
-      right: r.right - cRect.left,
-      top: r.top - cRect.top,
-      bottom: r.bottom - cRect.top,
-      cx: r.left - cRect.left + r.width / 2,
-      cy: r.top - cRect.top + r.height / 2,
-    };
+    return { top: r.top - cRect.top, bottom: r.bottom - cRect.top, cx: r.left - cRect.left + r.width / 2 };
   };
 
-  const addPath = (d, dashed = false) => {
+  const addPath = (d) => {
     const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
     p.setAttribute('d', d);
     p.setAttribute('fill', 'none');
@@ -423,153 +557,138 @@ function drawTreeConnectors(container, svg, nodeMap, family, opts) {
     p.setAttribute('stroke-width', '1.5');
     p.setAttribute('stroke-linecap', 'round');
     p.setAttribute('stroke-linejoin', 'round');
-    if (dashed) p.setAttribute('stroke-dasharray', '4 4');
     svg.appendChild(p);
   };
 
-  const connectParentsToChildren = (parentKeys, childKeys) => {
-    const pBoxes = parentKeys.map(getBox).filter(Boolean);
-    const cBoxes = childKeys.map(getBox).filter(Boolean);
-    if (pBoxes.length === 0 || cBoxes.length === 0) return;
-
-    let originX = pBoxes[0].cx;
-    let originY = pBoxes[0].bottom;
-
-    if (pBoxes.length === 2) {
-      const [a, b] = pBoxes[0].cx <= pBoxes[1].cx ? [pBoxes[0], pBoxes[1]] : [pBoxes[1], pBoxes[0]];
-      const barY = Math.max(a.bottom, b.bottom) + 8;
-      addPath(`M ${a.cx} ${a.bottom} L ${a.cx} ${barY} L ${b.cx} ${barY} L ${b.cx} ${b.bottom}`);
-      originX = (a.cx + b.cx) / 2;
-      originY = barY;
-    }
-
-    const minChildTop = Math.min(...cBoxes.map((c) => c.top));
-    const midY = originY + Math.max(12, (minChildTop - originY) / 2);
-
-    if (cBoxes.length === 1) {
-      const c = cBoxes[0];
-      addPath(`M ${originX} ${originY} L ${originX} ${midY} L ${c.cx} ${midY} L ${c.cx} ${c.top}`);
-    } else {
-      const xs = cBoxes.map((c) => c.cx);
-      addPath(`M ${originX} ${originY} L ${originX} ${midY} M ${Math.min(...xs)} ${midY} L ${Math.max(...xs)} ${midY}`);
-      for (const c of cBoxes) {
-        addPath(`M ${c.cx} ${midY} L ${c.cx} ${c.top}`);
-      }
-    }
-  };
-
-  if (opts.showGreatGrandparents) {
-    for (const item of family.greatGrandparentsByGrandparent) {
-      connectParentsToChildren(
-        item.greatGrandparents.map((ggp) => `ggp:${item.grandparent.id}:${ggp.id}`),
-        [`gp:${item.grandparent.id}`]
-      );
-    }
-  }
-
-  if (opts.showGrandparents) {
-    for (const item of family.grandparentsByParent) {
-      if (item.grandparents.length > 0) {
-        connectParentsToChildren(
-          item.grandparents.map((gp) => `gp:${gp.id}`),
-          [`parent:${item.parent.id}`]
-        );
-      }
-    }
-  }
-
-  if (family.parents.length > 0) {
-    const parentKeys = family.parents.map((p) => `parent:${p.id}`);
-    const childKeys = [`focus:${family.person.id}`];
-    if (opts.siblingsInline) {
-      for (const sib of family.siblings) {
-        const box = getBox(`sib:${sib.id}`);
-        if (box && box.left >= -20 && box.right <= cRect.width + 20) {
-          childKeys.push(`sib:${sib.id}`);
-        }
-      }
-    }
-    connectParentsToChildren(parentKeys, childKeys);
-  }
-
-  const focusBox = getBox(`focus:${family.person.id}`);
-  if (focusBox) {
-    family.unions.forEach((ug) => {
-      const spouseBox = ug.spouse ? getBox(`spouse:${ug.spouse.id}`) : null;
-      if (spouseBox && Math.abs(spouseBox.cy - focusBox.cy) < 40) {
-        const leftBox = focusBox.cx < spouseBox.cx ? focusBox : spouseBox;
-        const rightBox = focusBox.cx < spouseBox.cx ? spouseBox : focusBox;
-        addPath(
-          `M ${leftBox.right} ${focusBox.cy} L ${rightBox.left} ${spouseBox.cy}`,
-          ug.union?.status === 'ended' || ug.union?.status === 'divorced'
-        );
-      }
-
-      const childKeys = ug.children.map((c) => `child:${c.id}`);
-      if (childKeys.length > 0) {
-        if (spouseBox && Math.abs(spouseBox.cy - focusBox.cy) < 40 && family.unions.length === 1) {
-          const originX = (focusBox.cx + spouseBox.cx) / 2;
-          const originY = focusBox.cy;
-          const cBoxes = childKeys.map(getBox).filter(Boolean);
-          if (cBoxes.length > 0) {
-            const minTop = Math.min(...cBoxes.map((c) => c.top));
-            const midY = Math.max(focusBox.bottom + 14, originY + (minTop - originY) * 0.55);
-            const xs = cBoxes.map((c) => c.cx);
-            addPath(`M ${originX} ${originY} L ${originX} ${midY} M ${Math.min(...xs)} ${midY} L ${Math.max(...xs)} ${midY}`);
-            for (const c of cBoxes) {
-              addPath(`M ${c.cx} ${midY} L ${c.cx} ${c.top}`);
-            }
-          }
-        } else {
-          const anchorKey =
-            spouseBox && family.unions.length > 1
-              ? `spouse:${ug.spouse.id}`
-              : `focus:${family.person.id}`;
-          connectParentsToChildren([anchorKey], childKeys);
-        }
-      }
-    });
-  }
-
-  if (opts.showGrandchildren) {
-    for (const [childId, gcs] of family.childrenById.entries()) {
-      if (gcs.length > 0) {
-        connectParentsToChildren(
-          [`child:${childId}`],
-          gcs.map((g) => `gc:${g.id}`)
-        );
-      }
-    }
+  for (const link of links) {
+    const o = boxOf(link.origin());
+    if (!o) continue;
+    const targets = link.targets().map(boxOf).filter(Boolean);
+    if (targets.length === 0) continue;
+    const minTop = Math.min(...targets.map((t) => t.top));
+    const midY = o.bottom + Math.max(8, (minTop - o.bottom) / 2);
+    const xs = targets.map((t) => t.cx).concat(o.cx);
+    addPath(`M ${o.cx} ${o.bottom} L ${o.cx} ${midY} M ${Math.min(...xs)} ${midY} L ${Math.max(...xs)} ${midY}`);
+    for (const t of targets) addPath(`M ${t.cx} ${midY} L ${t.cx} ${t.top}`);
   }
 }
 
+// Per-device tree settings. `rowBudget` counts generation rows besides the focus row.
+// `nameOnlyFrom` is the generation distance at which cards drop the photo and dates.
+function getTreeLayoutConfig(layoutClass) {
+  return layoutClass === 'phone' ? { rowBudget: 4, nameOnlyFrom: 2 } : { rowBudget: 6, nameOnlyFrom: 3 };
+}
+
+// Splits the row budget evenly above and below the focus row. A side with fewer generations gives
+// its unused rows to the other side.
+function splitRowBudget(upAvailable, downAvailable, budget) {
+  let up = Math.min(upAvailable, Math.floor(budget / 2));
+  const down = Math.min(downAvailable, budget - up);
+  up = Math.min(upAvailable, budget - down);
+  return { up, down };
+}
+
+// Row label for the generation `distance` steps above ('up') or below ('down') the focus.
+function generationLabel(distance, direction) {
+  const names = direction === 'up'
+    ? [UI_STRINGS.parents, UI_STRINGS.grandparents, UI_STRINGS.greatGrandparents]
+    : [UI_STRINGS.children, UI_STRINGS.grandchildren, UI_STRINGS.greatGrandchildren];
+  if (distance <= names.length) return names[distance - 1];
+  return `${distance - 2}× ${names[2].toLowerCase()}`;
+}
+
+// Text for the pill that marks generations left out by the row budget.
+function hiddenGenerationsText(count, direction) {
+  return `${direction === 'up' ? '▲' : '▼'} ${count} more generation${count > 1 ? 's' : ''} ${direction === 'up' ? 'above' : 'below'}`;
+}
+
+// Inline prompt used by keyboard navigation when an arrow key has several possible targets.
+function renderKeyboardPrompt() {
+  return el('div', { className: 'kb-prompt', role: 'dialog', 'aria-label': state.keyboardPrompt.title }, [
+    el('span', { style: { fontWeight: '600', color: 'var(--accent-forest)' }, textContent: `${state.keyboardPrompt.title}:` }),
+    el(
+      'div',
+      { style: { display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' } },
+      [
+        ...state.keyboardPrompt.choices.map((c, idx) =>
+          el(
+            'button',
+            {
+              type: 'button',
+              className: 'btn btn-outline',
+              style: { minHeight: '34px', padding: '0 10px' },
+              onclick: () => navigateFocus(c.id),
+            },
+            [
+              el('span', { className: 'tabular-nums', style: { color: 'var(--text-secondary)', fontSize: '12px' }, textContent: `${idx + 1}.` }),
+              el('span', { textContent: c.name }),
+            ]
+          )
+        ),
+        el('button', {
+          type: 'button',
+          className: 'btn btn-ghost',
+          style: { minHeight: '34px' },
+          textContent: 'Esc',
+          onclick: () => {
+            state.keyboardPrompt = null;
+            render();
+          },
+        }),
+      ]
+    ),
+  ]);
+}
+
 let activeConnectorObserver = null;
+// Focus person whose row was last scrolled into view, so re-renders for other reasons keep the scroll.
+let lastCenteredFocusId = null;
+// Which partner of the focused person the couple card shows. Resets when the focus changes.
+const spousePage = { personId: null, index: 0 };
 
+// Pager on the focus unit that cycles through the focused person's partners and the children of each.
+function createSpousePager(pageCount) {
+  const current = (spousePage.index % pageCount) + 1;
+  return el('button', {
+    type: 'button',
+    className: 'spouse-pager',
+    'aria-label': `${UI_STRINGS.nextSpouse} (${current} of ${pageCount})`,
+    onclick: () => {
+      spousePage.index = (spousePage.index + 1) % pageCount;
+      render();
+    },
+  }, [`${current}/${pageCount} ›`]);
+}
+
+// Brings the focus row to the vertical centre of the window when the tree is taller than the window.
+function scrollFocusRowIntoView(row) {
+  if (document.documentElement.scrollHeight <= window.innerHeight) {
+    window.scrollTo(0, 0);
+    return;
+  }
+  const r = row.getBoundingClientRect();
+  window.scrollTo(0, Math.max(0, window.scrollY + r.top + r.height / 2 - window.innerHeight / 2));
+}
+
+// Focus tree. Each generation is one row that never wraps. The focus row holds the siblings around a
+// couple card (focused person + spouse). Ancestor rows (direct line only) sit above and descendant rows
+// below, sharing a per-device row budget. Generations far from the focus use name-only cards.
 function renderFocusCanvas(family, viewport) {
-  const { layoutClass, isLandscapePhone } = viewport;
-  const showGrandparents = layoutClass === 'desktop' || layoutClass === 'tablet' || isLandscapePhone;
-  const showGreatGrandparents = layoutClass === 'desktop' && family.greatGrandparentsByGrandparent.length > 0;
-  const showGrandchildren = layoutClass === 'desktop';
+  const { rowBudget, nameOnlyFrom } = getTreeLayoutConfig(viewport.layoutClass);
+  const focus = family.person;
 
-  const spouseCount = family.unions.filter((u) => u.spouse).length;
-  const availableWidth =
-    layoutClass === 'desktop'
-      ? Math.min(1020, viewport.width - 376) - 48
-      : viewport.width - 48;
-  const focusAndSpousesWidth =
-    236 +
-    (spouseCount > 0
-      ? 24 + Math.min(spouseCount, 2) * 212 + (Math.min(spouseCount, 2) - 1) * 10
-      : 0);
-  const siblingsWidth =
-    family.siblings.length > 0
-      ? family.siblings.length * 168 + (family.siblings.length - 1) * 10 + 4
-      : 0;
-  const siblingsInline =
-    layoutClass !== 'phone' &&
-    family.siblings.length > 0 &&
-    family.siblings.length <= 2 &&
-    siblingsWidth + 20 + focusAndSpousesWidth <= availableWidth;
+  // Each union group (spouse, or co-parent-less children) is one page of the couple card.
+  if (spousePage.personId !== focus.id) {
+    spousePage.personId = focus.id;
+    spousePage.index = 0;
+  }
+  const pages = family.unions;
+  const page = pages.length > 0 ? pages[spousePage.index % pages.length] : null;
+  const children = page ? page.children : [];
+
+  const ancestorLevels = getAncestorLevels(state.graph, focus.id);
+  const descendantLevels = getDescendantLevels(state.graph, children);
+  const { up, down } = splitRowBudget(ancestorLevels.length, descendantLevels.length, rowBudget);
 
   preloadImmediateThumbs(family);
 
@@ -579,280 +698,146 @@ function renderFocusCanvas(family, viewport) {
   svg.setAttribute('class', 'connector-svg');
   canvas.appendChild(svg);
 
-  const nodeMap = new Map();
-  const scheduleDraw = () =>
-    requestAnimationFrame(() =>
-      drawTreeConnectors(canvas, svg, nodeMap, family, {
-        layoutClass,
-        siblingsInline,
-        showGrandparents,
-        showGreatGrandparents,
-        showGrandchildren,
-      })
-    );
-
-  if (state.keyboardPrompt) {
-    canvas.appendChild(
-      el('div', { className: 'kb-prompt', role: 'dialog', 'aria-label': state.keyboardPrompt.title }, [
-        el('span', { style: { fontWeight: '600', color: 'var(--accent-forest)' }, textContent: `${state.keyboardPrompt.title}:` }),
-        el(
-          'div',
-          { style: { display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' } },
-          [
-            ...state.keyboardPrompt.choices.map((c, idx) =>
-              el(
-                'button',
-                {
-                  type: 'button',
-                  className: 'btn btn-outline',
-                  style: { minHeight: '34px', padding: '0 10px' },
-                  onclick: () => navigateFocus(c.id),
-                },
-                [
-                  el('span', { className: 'tabular-nums', style: { color: 'var(--text-secondary)', fontSize: '12px' }, textContent: `${idx + 1}.` }),
-                  el('span', { textContent: c.name }),
-                ]
-              )
-            ),
-            el('button', {
-              type: 'button',
-              className: 'btn btn-ghost',
-              style: { minHeight: '34px' },
-              textContent: 'Esc',
-              onclick: () => {
-                state.keyboardPrompt = null;
-                render();
-              },
-            }),
-          ]
-        ),
-      ])
-    );
-  }
-
-  const tiers = el('div', { className: 'tree-tiers' });
-
-  // Great-grandparents
-  if (showGreatGrandparents) {
-    const items = family.greatGrandparentsByGrandparent.flatMap((x) =>
-      x.greatGrandparents.map((ggp) => ({ ggp, gpId: x.grandparent.id }))
-    );
-    tiers.appendChild(
-      el('section', { className: 'tier-section', 'aria-label': UI_STRINGS.greatGrandparents }, [
-        el('span', { className: 'tier-label', textContent: UI_STRINGS.greatGrandparents }),
-        el(
-          'div',
-          { className: 'tier-row' },
-          items.map(({ ggp, gpId }) =>
-            createPersonNode({
-              person: ggp,
-              compact: true,
-              refKey: `ggp:${gpId}:${ggp.id}`,
-              nodeMap,
-            })
-          )
-        ),
-      ])
-    );
-  }
-
-  // Grandparents
-  const gps = family.grandparentsByParent.flatMap((x) => x.grandparents);
-  if (showGrandparents && gps.length > 0) {
-    tiers.appendChild(
-      el('section', { className: 'tier-section', 'aria-label': UI_STRINGS.grandparents }, [
-        el('span', { className: 'tier-label', textContent: UI_STRINGS.grandparents }),
-        el(
-          'div',
-          { className: 'tier-row' },
-          gps.map((gp) =>
-            createPersonNode({
-              person: gp,
-              compact: true,
-              refKey: `gp:${gp.id}`,
-              nodeMap,
-            })
-          )
-        ),
-      ])
-    );
-  }
-
-  // Parents (showing Mother / Father)
-  if (family.parents.length > 0) {
-    tiers.appendChild(
-      el('section', { className: 'tier-section', 'aria-label': UI_STRINGS.parents }, [
-        el('span', { className: 'tier-label', textContent: UI_STRINGS.parents }),
-        el(
-          'div',
-          { className: 'tier-row' },
-          family.parents.map((parent) =>
-            createPersonNode({
-              person: parent,
-              subtitle: parentRoleLabel(parent),
-              eagerPhoto: true,
-              refKey: `parent:${parent.id}`,
-              nodeMap,
-            })
-          )
-        ),
-      ])
-    );
-  } else {
-    tiers.appendChild(
-      el('section', { className: 'tier-section', 'aria-label': UI_STRINGS.parents }, [
-        el('p', { className: 'muted-empty', textContent: UI_STRINGS.unknownParents }),
-      ])
-    );
-  }
-
-  // Focus Row: Siblings + Focus + Spouses
-  const focusBand = el('section', { className: 'focus-band', 'aria-label': 'Focused person and immediate family' });
-  const horizWrap = el('div', { className: siblingsInline ? 'focus-band-horizontal' : 'focus-band' });
-
-  const makeSiblingBlock = (inline) => {
-    const listWrap = el(
-      'div',
-      {
-        className: inline ? 'h-strip' : 'tier-row',
-        onscroll: inline ? scheduleDraw : null,
-      },
-      family.siblings.map((sib) =>
-        createPersonNode({
-          person: sib,
-          compact: true,
-          eagerPhoto: true,
-          refKey: `sib:${sib.id}`,
-          nodeMap,
-        })
-      )
-    );
-    return el('div', { className: inline ? 'siblings-block' : 'siblings-block is-stacked' }, [
-      el('span', { className: 'tier-label', textContent: `${UI_STRINGS.siblings} (${family.siblings.length})` }),
-      listWrap,
-    ]);
+  const links = [];
+  const strips = [];
+  const scheduleDraw = () => requestAnimationFrame(() => drawFamilyLines(canvas, svg, links));
+  const addStrip = (items, center = null, extraClass = '') => {
+    const s = createGenerationStrip(items, scheduleDraw, extraClass);
+    strips.push({ ...s, center });
+    return s.wrap;
   };
 
-  if (siblingsInline) {
-    horizWrap.appendChild(makeSiblingBlock(true));
+  // Element that receives the line from each person's parents.
+  const tops = new Map();
+
+  if (state.keyboardPrompt) canvas.appendChild(renderKeyboardPrompt());
+
+  const tiers = el('div', { className: 'tree-tiers' });
+  const addRow = (label, content) => {
+    const row = el('section', { className: 'tier-section', 'aria-label': label || null }, [
+      label ? el('span', { className: 'tier-label', textContent: label }) : null,
+      content,
+    ]);
+    tiers.appendChild(row);
+    return row;
+  };
+  const addHiddenGenerations = (count, direction) =>
+    tiers.appendChild(el('p', { className: 'more-generations', textContent: hiddenGenerationsText(count, direction) }));
+
+  // Ancestor rows, furthest first. Each unit is the parents of one person in the row below.
+  if (ancestorLevels.length > up) addHiddenGenerations(ancestorLevels.length - up, 'up');
+  for (let distance = up; distance >= 1; distance--) {
+    const nameOnly = distance >= nameOnlyFrom;
+    const units = ancestorLevels[distance - 1].map((unit) => {
+      const [a, b] = unit.people;
+      let node;
+      if (b && nameOnly) {
+        node = createNameCoupleCard(a, b, findUnion(a.id, b.id));
+        tops.set(a.id, node);
+        tops.set(b.id, node);
+      } else if (b) {
+        const couple = createCoupleCard({ left: a, right: b, union: findUnion(a.id, b.id), compact: distance > 1, eagerPhoto: distance === 1 });
+        node = couple.card;
+        tops.set(a.id, couple.leftHalf);
+        tops.set(b.id, couple.rightHalf);
+      } else if (nameOnly) {
+        node = createNameCard(a);
+        tops.set(a.id, node);
+      } else {
+        node = createPersonNode({ person: a, compact: distance > 1, subtitle: distance === 1 ? parentRoleLabel(a) : '', eagerPhoto: distance === 1 });
+        tops.set(a.id, node);
+      }
+      return { node, childId: unit.childId };
+    });
+    addRow(generationLabel(distance, 'up'), addStrip(units.map((u) => u.node)));
+    for (const u of units) {
+      // Parents connect to the focused person and every sibling; older ancestors to their one child.
+      const targets = distance === 1
+        ? () => [...family.siblings, focus].map((p) => tops.get(p.id))
+        : () => [tops.get(u.childId)];
+      links.push({ origin: () => u.node, targets });
+    }
+  }
+  if (ancestorLevels.length === 0) {
+    addRow(null, el('p', { className: 'muted-empty', textContent: UI_STRINGS.unknownParents }));
   }
 
-  const focusAndSpouses = el('div', { className: 'focus-and-spouses' }, [
-    createPersonNode({
-      person: family.person,
-      isFocused: true,
-      eagerPhoto: true,
-      refKey: `focus:${family.person.id}`,
-      nodeMap,
-    }),
-  ]);
-
-  if (family.unions.some((u) => u.spouse)) {
-    const spouseStrip = el(
-      'div',
-      { className: 'h-strip', style: { width: 'auto' }, onscroll: scheduleDraw },
-      family.unions
-        .filter((u) => u.spouse)
-        .map((ug) => {
-          const mYr = extractYear(ug.union?.married);
-          const eYr = extractYear(ug.union?.ended);
-          const unionSub = mYr
-            ? eYr
-              ? `m. ${mYr}–${eYr}`
-              : `m. ${mYr}`
-            : ug.union?.status === 'divorced'
-              ? 'divorced'
-              : '';
-          return createPersonNode({
-            person: ug.spouse,
-            eagerPhoto: true,
-            showHasParentsHint: true,
-            subtitle: unionSub,
-            refKey: `spouse:${ug.spouse.id}`,
-            nodeMap,
-          });
-        })
-    );
-    focusAndSpouses.appendChild(spouseStrip);
-  }
-
-  horizWrap.appendChild(focusAndSpouses);
-  focusBand.appendChild(horizWrap);
-
-  if (!siblingsInline && family.siblings.length > 0) {
-    focusBand.appendChild(makeSiblingBlock(false));
-  }
-
-  tiers.appendChild(focusBand);
-
-  // Children & Grandchildren grouped per union
-  const unionsWithKids = family.unions.filter((u) => u.children.length > 0);
-  if (unionsWithKids.length > 0) {
-    tiers.appendChild(
-      el('section', { className: 'tier-section', 'aria-label': UI_STRINGS.children }, [
-        el(
-          'div',
-          { className: 'unions-children-grid' },
-          unionsWithKids.map((ug) => {
-            const heading =
-              family.unions.length > 1
-                ? ug.spouse
-                  ? `With ${ug.spouse.name}`
-                  : UI_STRINGS.children
-                : ug.spouse
-                  ? UI_STRINGS.children
-                  : `${UI_STRINGS.children} (single parent)`;
-
-            return el('div', { className: 'union-group' }, [
-              el('span', { className: 'tier-label', textContent: heading }),
-              el(
-                'div',
-                { className: 'tier-row' },
-                ug.children.map((child) => {
-                  const gcs = showGrandchildren ? family.childrenById.get(child.id) || [] : [];
-                  return el('div', { className: 'child-column' }, [
-                    createPersonNode({
-                      person: child,
-                      eagerPhoto: true,
-                      refKey: `child:${child.id}`,
-                      nodeMap,
-                    }),
-                    gcs.length > 0
-                      ? el(
-                          'div',
-                          { className: 'grandchildren-row' },
-                          gcs.map((gc) =>
-                            createPersonNode({
-                              person: gc,
-                              compact: true,
-                              refKey: `gc:${gc.id}`,
-                              nodeMap,
-                            })
-                          )
-                        )
-                      : null,
-                  ]);
-                })
-              ),
-            ]);
-          })
-        ),
-      ])
-    );
+  // Focus row: older siblings, the focus unit (couple card or single card, with the spouse pager), younger siblings.
+  let focusUnit;
+  if (page?.spouse) {
+    const couple = createCoupleCard({ left: focus, right: page.spouse, union: page.union, focusLeft: true, eagerPhoto: true });
+    focusUnit = couple.card;
+    tops.set(focus.id, couple.leftHalf);
   } else {
-    tiers.appendChild(
-      el('section', { className: 'tier-section', 'aria-label': UI_STRINGS.children }, [
-        el('p', { className: 'muted-empty', textContent: UI_STRINGS.noChildren }),
-      ])
-    );
+    focusUnit = createPersonNode({ person: focus, isFocused: true, eagerPhoto: true });
+    tops.set(focus.id, focusUnit);
   }
+  const focusUnitWrap = el('div', { className: 'focus-unit' }, [focusUnit, pages.length > 1 ? createSpousePager(pages.length) : null]);
+
+  const generation = [...family.siblings, focus].sort(sortByBirthThenName);
+  const focusIndex = generation.indexOf(focus);
+  const siblingNode = (person) => {
+    const node = createPersonNode({ person, compact: true, eagerPhoto: true });
+    tops.set(person.id, node);
+    return node;
+  };
+  const focusRowLabel = family.siblings.length > 0
+    ? `${UI_STRINGS.siblings} · ${page?.spouse ? UI_STRINGS.focusAndSpouse : UI_STRINGS.focus}`
+    : page?.spouse ? UI_STRINGS.focusAndSpouseTitle : null;
+  const focusRow = addRow(
+    focusRowLabel,
+    addStrip(
+      [
+        ...generation.slice(0, focusIndex).map(siblingNode),
+        focusUnitWrap,
+        ...generation.slice(focusIndex + 1).map(siblingNode),
+      ],
+      focusUnitWrap
+    )
+  );
+
+  // Descendant rows, nearest first. Children hang from the focus unit, later generations from their parent's card.
+  const bottoms = new Map();
+  for (let distance = 1; distance <= down; distance++) {
+    const nameOnly = distance >= nameOnlyFrom;
+    const groups = descendantLevels[distance - 1].map((group) => {
+      const cards = group.kids.map((kid) => {
+        const node = nameOnly
+          ? createNameCard(kid)
+          : createPersonNode({ person: kid, compact: distance > 1, eagerPhoto: distance === 1 });
+        bottoms.set(kid.id, node);
+        return node;
+      });
+      links.push({ origin: () => (group.parentId ? bottoms.get(group.parentId) : focusUnit), targets: () => cards });
+      return el('div', { className: 'gen-group' }, cards);
+    });
+    addRow(generationLabel(distance, 'down'), addStrip(groups, null, 'has-groups'));
+  }
+  if (children.length === 0) {
+    addRow(null, el('p', { className: 'muted-empty', textContent: UI_STRINGS.noChildren }));
+  }
+  if (descendantLevels.length > down) addHiddenGenerations(descendantLevels.length - down, 'down');
 
   canvas.appendChild(tiers);
 
+  const refreshLayout = () => {
+    strips.forEach((s) => s.updateArrows());
+    scheduleDraw();
+  };
   if (activeConnectorObserver) activeConnectorObserver.disconnect();
-  activeConnectorObserver = new ResizeObserver(scheduleDraw);
+  activeConnectorObserver = new ResizeObserver(refreshLayout);
   activeConnectorObserver.observe(canvas);
-  scheduleDraw();
+
+  // Once the canvas is in the document: centre every strip (the focus row on the focus unit), then
+  // bring the focus row into view if the focus changed since the last render.
+  requestAnimationFrame(() => {
+    for (const s of strips) centerStrip(s.strip, s.center);
+    if (lastCenteredFocusId !== focus.id) {
+      lastCenteredFocusId = focus.id;
+      scrollFocusRowIntoView(focusRow);
+    }
+    refreshLayout();
+  });
 
   return canvas;
 }
