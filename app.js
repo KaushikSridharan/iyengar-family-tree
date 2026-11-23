@@ -405,23 +405,6 @@ function createPersonNode({
 
   const wrap = el('div', { className: 'person-wrap' }, [cardBtn]);
 
-  if (!isFocused) {
-    const hoverLoc = person.location || person.residence || person.birthplace;
-    wrap.appendChild(
-      el('div', { className: 'hover-preview', role: 'tooltip' }, [
-        createAvatar(person, 'md', 'thumb', false),
-        el('div', { className: 'person-card-text' }, [
-          el('div', {
-            style: { fontFamily: 'var(--font-display)', fontSize: '14px', fontWeight: '600' },
-            textContent: person.fullName || person.name,
-          }),
-          years ? el('div', { className: 'person-meta tabular-nums', textContent: years }) : null,
-          hoverLoc ? el('div', { className: 'person-meta', textContent: hoverLoc }) : null,
-        ]),
-      ])
-    );
-  }
-
   return wrap;
 }
 

@@ -894,31 +894,6 @@ button {
   }
 }
 
-/* Desktop Hover Preview */
-.hover-preview {
-  display: none;
-}
-
-@media (min-width: 1024px) {
-  .person-wrap:hover .hover-preview {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    position: absolute;
-    left: 50%;
-    bottom: calc(100% + 8px);
-    transform: translateX(-50%);
-    z-index: 30;
-    width: 230px;
-    padding: 10px;
-    border-radius: 14px;
-    border: 1px solid var(--border-hairline);
-    background: var(--bg-surface);
-    box-shadow: 0 10px 26px rgba(28, 25, 23, 0.12);
-    pointer-events: none;
-  }
-}
-
 /* Avatar */
 .avatar {
   flex-shrink: 0;
