@@ -1,0 +1,106 @@
+{
+  "title": "Iyengar Family Tree",
+  "lastUpdated": "2026-11-23",
+  "people": {
+    "p1": {
+      "name": "Sundararaj",
+      "fullName": "B. K. S. Iyengar",
+      "gender": "m",
+      "born": "1918-12-14",
+      "died": "2014-08-20",
+      "birthplace": "Bellur, Karnataka",
+      "location": "Pune, Maharashtra",
+      "photo": "p1-b-k-s-iyengar.webp"
+    },
+    "p2": {
+      "name": "Ramamani",
+      "fullName": "Ramamani Iyengar",
+      "gender": "f",
+      "born": "1927-11-02",
+      "died": "1973",
+      "photo": "p2-ramamani-iyengar.webp"
+    },
+    "p3": {
+      "name": "Geeta",
+      "fullName": "Geeta S. Iyengar",
+      "gender": "f",
+      "born": "1944-12-07",
+      "died": "2018-12-16",
+      "birthplace": "Tumkur, Karnataka",
+      "location": "Pune, Maharashtra",
+      "parents": [
+        "p2",
+        "p1"
+      ],
+      "photo": "p3-geeta-s-iyengar.webp"
+    },
+    "p4": {
+      "name": "Vanita",
+      "fullName": "Vanita Sridharan",
+      "gender": "f",
+      "born": "1947-08-29",
+      "birthplace": "Pune, Maharashtra",
+      "location": "Pune, Maharashtra",
+      "parents": [
+        "p2",
+        "p1"
+      ]
+    },
+    "p5": {
+      "name": "Prashant",
+      "fullName": "Prashant S. Iyengar",
+      "gender": "m",
+      "born": "1949-07-02",
+      "location": "Pune, Maharashtra",
+      "parents": [
+        "p2",
+        "p1"
+      ]
+    },
+    "p6": {
+      "name": "Sunita",
+      "fullName": "Sunita Parthasarathy",
+      "gender": "f",
+      "born": "1951-07-03",
+      "birthplace": "Pune, Maharashtra",
+      "location": "Pune, Maharashtra",
+      "parents": [
+        "p2",
+        "p1"
+      ]
+    },
+    "p7": {
+      "name": "Suchita",
+      "fullName": "Suchita Sridhar",
+      "gender": "f",
+      "born": "1953-07-21",
+      "birthplace": "Pune, Maharashtra",
+      "location": "Pune, Maharashtra",
+      "parents": [
+        "p2",
+        "p1"
+      ]
+    },
+    "p8": {
+      "name": "Savita",
+      "fullName": "Savita Raghu",
+      "gender": "f",
+      "born": "1955-05-05",
+      "birthplace": "Pune, Maharashtra",
+      "location": "Bangalore, Karnataka",
+      "parents": [
+        "p2",
+        "p1"
+      ]
+    }
+  },
+  "unions": [
+    {
+      "partners": [
+        "p2",
+        "p1"
+      ],
+      "married": "1943"
+    }
+  ]
+}

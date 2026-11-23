@@ -1,0 +1,6 @@
+{
+  "name": "Kulkarni & Moreau Family Tree",
+  "description": "Read-only, offline-capable family tree viewer with focus navigation, search, relationship labels, and connection finder.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,17 @@
+{
+  "name": "iyengar-family-tree",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "python3 scripts/serve.py",
+    "build": "python3 scripts/validate.py",
+    "preview": "python3 scripts/serve.py",
+    "lint": "python3 -m py_compile scripts/*.py && python3 scripts/validate.py",
+    "validate": "python3 scripts/validate.py",
+    "validate:report": "python3 scripts/validate.py --report",
+    "edit": "python3 scripts/edit_tree.py",
+    "format:tree": "python3 scripts/format_tree.py",
+    "add-photo": "python3 scripts/add_photo.py",
+    "new-id": "python3 scripts/new_id.py"
+  }
+}
