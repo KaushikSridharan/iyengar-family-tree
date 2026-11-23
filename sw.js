@@ -1,6 +1,6 @@
-const SHELL_CACHE = 'family-tree-shell-v13';
-const DATA_CACHE = 'family-tree-data-v13';
-const PHOTO_CACHE = 'family-tree-photos-v13';
+const SHELL_CACHE = 'family-tree-shell-v14';
+const DATA_CACHE = 'family-tree-data-v14';
+const PHOTO_CACHE = 'family-tree-photos-v14';
 
 const SHELL_ASSETS = [
   './',
@@ -14,6 +14,7 @@ const SHELL_ASSETS = [
   './icon.svg',
   './pwa-192x192.png',
   './pwa-512x512.png',
+  './pwa-maskable-512x512.png',
   './apple-touch-icon.png',
 ];
 
@@ -43,7 +44,9 @@ self.addEventListener('activate', (event) => {
 async function networkFirst(request, cacheName) {
   const cache = await caches.open(cacheName);
   try {
-    const response = await fetch(request, { cache: 'no-cache' });
+    const response = await (request.mode === 'navigate'
+      ? fetch(request)
+      : fetch(request, { cache: 'no-cache' }));
     if (response && response.ok) {
       cache.put(request, response.clone());
     }
