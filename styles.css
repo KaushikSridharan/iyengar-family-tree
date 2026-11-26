@@ -1112,6 +1112,11 @@ button {
   background: var(--bg-muted);
 }
 
+/* Search result picked by Enter. */
+.relative-row.is-active {
+  background: var(--accent-forest-soft);
+}
+
 /* Phone Bottom Nav */
 .phone-bottom-bar {
   position: fixed;

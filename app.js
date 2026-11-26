@@ -247,8 +247,8 @@ function syncRouteFromHash() {
 // history entry tagged `{ overlayDepth }`, so the phone back gesture closes the top overlay instead of
 // leaving the app. Moving between people replaces the current entry, so history never fills with people.
 const overlayClosers = [];
-// Person to focus once open overlays have been unwound through history.
-let pendingFocusId = null;
+// Person to focus once overlays above `depth` have been unwound through history.
+let pendingFocus = null;
 
 // Opens an overlay: applies `open`, records `close` for the back gesture, and pushes a history entry.
 function openOverlay(open, close, url = window.location.href) {
@@ -274,37 +274,53 @@ function closeOverlay() {
 }
 
 // Back/forward handler: closes overlays above the entry landed on, then applies any pending focus.
+// Overlays can change the focused person (details sheet, connection finder) while the entry underneath
+// still holds the old URL, so after closing them the current person is kept and written back to that entry.
 function handlePopState(event) {
   const depth = event.state?.overlayDepth || 0;
+  const focusBefore = getFocusedId();
+  const closedAny = overlayClosers.length > depth;
   while (overlayClosers.length > depth) overlayClosers.pop()();
-  if (pendingFocusId && overlayClosers.length === 0) {
-    const id = pendingFocusId;
-    pendingFocusId = null;
-    applyFocus(id);
+  if (pendingFocus && overlayClosers.length <= pendingFocus.depth) {
+    const { personId } = pendingFocus;
+    pendingFocus = null;
+    switchFocus(personId);
+    return;
+  }
+  if (closedAny && focusBefore) {
+    switchFocus(focusBefore);
     return;
   }
   syncRouteFromHash();
   render();
 }
 
-// Focuses a person in place: the URL changes for sharing, but no history entry is added.
-function applyFocus(personId) {
-  state.route = { kind: 'focus', personId };
-  window.history.replaceState(null, '', `#/${personId}`);
-  render();
-}
-
-// Focuses a person. Open overlays are unwound first so their history entries do not linger.
-function navigateFocus(personId) {
+// Changes the focused person in place, leaving open overlays as they are. The URL changes for sharing,
+// but no history entry is added.
+function switchFocus(personId) {
   if (!state.graph || !state.graph.peopleById.has(personId)) return;
   state.missingNotice = null;
   state.keyboardPrompt = null;
-  if (overlayClosers.length > 0) {
-    pendingFocusId = personId;
-    window.history.go(-overlayClosers.length);
+  state.route = { kind: 'focus', personId };
+  window.history.replaceState(window.history.state, '', `#/${personId}`);
+  render();
+}
+
+// Focuses a person after closing overlays above `depth` (0 closes all of them). Closing goes through
+// history so the overlays' entries do not linger.
+function focusAtDepth(personId, depth) {
+  if (overlayClosers.length > depth) {
+    pendingFocus = { personId, depth };
+    window.history.go(depth - overlayClosers.length);
     return;
   }
-  applyFocus(personId);
+  switchFocus(personId);
+}
+
+// Focuses a person in the tree, closing every open overlay.
+function navigateFocus(personId) {
+  if (!state.graph || !state.graph.peopleById.has(personId)) return;
+  focusAtDepth(personId, 0);
 }
 
 // Shows the connection finder. From the tree it opens as an overlay; from the details sheet it takes
@@ -1034,9 +1050,8 @@ function renderPersonDetailsContent(family, layoutClass, onClose) {
     );
   }
 
-  const pickRelative = (id) => {
-    navigateFocus(id);
-  };
+  // Tapping a relative shows their details in place: the sheet (or sidebar) stays open.
+  const pickRelative = (id) => switchFocus(id);
 
   if (family.parents.length > 0) {
     body.appendChild(
@@ -1233,11 +1248,28 @@ function renderPhoneSearchModal() {
     style: { height: '48px', fontSize: '16px', paddingLeft: '40px' },
     placeholder: UI_STRINGS.searchPlaceholder,
     'aria-label': UI_STRINGS.searchPlaceholder,
+    enterkeyhint: 'go',
   });
   const list = el('div', { style: { flex: '1', overflowY: 'auto', padding: '8px 12px' } });
 
+  let matches = [];
+  // Highlighted result; -1 while the query is empty so Enter does not open an arbitrary person.
+  let activeIdx = -1;
+
+  // Opens a result. Only the search closes; an overlay under it (e.g. the details sheet) stays open
+  // on the picked person.
+  const pick = (person) => focusAtDepth(person.id, overlayClosers.length - 1);
+
+  // Moves the highlight and keeps the highlighted row in view.
+  const setActive = (idx) => {
+    activeIdx = idx;
+    Array.from(list.children).forEach((row, i) => row.classList.toggle('is-active', i === activeIdx));
+    list.children[activeIdx]?.scrollIntoView({ block: 'nearest' });
+  };
+
   const renderList = () => {
-    const matches = searchPeople(state.graph, input.value);
+    matches = searchPeople(state.graph, input.value);
+    activeIdx = input.value.trim() && matches.length > 0 ? 0 : -1;
     list.textContent = '';
     if (matches.length === 0) {
       list.appendChild(
@@ -1245,19 +1277,16 @@ function renderPhoneSearchModal() {
       );
       return;
     }
-    for (const p of matches) {
+    matches.forEach((p, idx) => {
       const years = formatYearsShort(p);
       list.appendChild(
         el(
           'button',
           {
             type: 'button',
-            className: 'relative-row',
+            className: `relative-row${idx === activeIdx ? ' is-active' : ''}`,
             style: { borderBottom: '1px solid #EFECE6', borderRadius: '0', minHeight: '56px' },
-            onclick: () => {
-              state.phoneSearchOpen = false;
-              navigateFocus(p.id);
-            },
+            onclick: () => pick(p),
           },
           [
             createAvatar(p, 'md', 'thumb', false),
@@ -1271,10 +1300,27 @@ function renderPhoneSearchModal() {
           ]
         )
       );
-    }
+    });
   };
 
   input.addEventListener('input', renderList);
+  // Enter (or the on-screen keyboard's Go key) opens the highlighted result, arrows move the
+  // highlight, Escape closes the search.
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      closeOverlay();
+    } else if (e.key === 'ArrowDown' && matches.length > 0) {
+      e.preventDefault();
+      setActive(Math.min(matches.length - 1, activeIdx + 1));
+    } else if (e.key === 'ArrowUp' && matches.length > 0) {
+      e.preventDefault();
+      setActive(Math.max(0, activeIdx - 1));
+    } else if (e.key === 'Enter' && matches[activeIdx]) {
+      e.preventDefault();
+      pick(matches[activeIdx]);
+    }
+  });
   renderList();
 
   modal.appendChild(
@@ -1840,14 +1886,26 @@ function render() {
               },
             }, [svgIcon(ICONS.back, 18), el('span', { textContent: 'Tree' })])
           : el('span', { className: 'tier-label', style: { paddingLeft: '6px' }, textContent: UI_STRINGS.details }),
-        el('button', {
-          type: 'button',
-          className: 'btn btn-ghost',
-          'aria-label': UI_STRINGS.close,
-          onclick: () => {
-            closeOverlay();
-          },
-        }, [svgIcon(ICONS.close, 20)]),
+        el('div', { style: { display: 'flex', alignItems: 'center', gap: '2px' } }, [
+          el('button', {
+            type: 'button',
+            className: 'btn btn-ghost',
+            'aria-label': UI_STRINGS.searchPlaceholder,
+            onclick: () =>
+              openOverlay(
+                () => { state.phoneSearchOpen = true; },
+                () => { state.phoneSearchOpen = false; }
+              ),
+          }, [svgIcon(ICONS.search, 19)]),
+          el('button', {
+            type: 'button',
+            className: 'btn btn-ghost',
+            'aria-label': UI_STRINGS.close,
+            onclick: () => {
+              closeOverlay();
+            },
+          }, [svgIcon(ICONS.close, 20)]),
+        ]),
       ]),
       el('div', { style: { flex: '1', overflowY: 'auto' } }, [
         renderPersonDetailsContent(family, viewport.layoutClass, closeOverlay),
