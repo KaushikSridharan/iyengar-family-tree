@@ -1,7 +1,7 @@
 {
   "title": "Iyengar Family Tree",
   "defaultStartId": "p1",
-  "lastUpdated": "2026-11-23",
+  "lastUpdated": "2026-11-25",
   "people": {
     "p1": {
       "name": "Sundararaj",
@@ -30,6 +30,7 @@
       "name": "Raghu",
       "fullName": "B. Raghu",
       "gender": "m",
+      "born": "1953-04-07",
       "died": "2023",
       "location": "Bangalore, Karnataka"
     },
@@ -92,6 +93,22 @@
         "p12"
       ]
     },
+    "p18": {
+      "name": "Mugdha",
+      "fullName": "Mugdha Srineet",
+      "gender": "f",
+      "born": "1978-05-27",
+      "birthplace": "Pune, Maharashtra",
+      "location": "Pune, Maharashtra"
+    },
+    "p19": {
+      "name": "Anitha",
+      "fullName": "Anitha Kaushik",
+      "gender": "f",
+      "born": "1977-06-22",
+      "birthplace": "Bangalore, Karnataka",
+      "location": "Bangalore, Karnataka"
+    },
     "p2": {
       "name": "Ramamani",
       "fullName": "Ramamani Iyengar",
@@ -99,6 +116,16 @@
       "born": "1927-11-02",
       "died": "1973",
       "photo": "p2-ramamani-iyengar.webp"
+    },
+    "p20": {
+      "name": "Pavithra",
+      "fullName": "Pavithra Hareeth",
+      "gender": "f"
+    },
+    "p21": {
+      "name": "Ajay",
+      "fullName": "Ajay Iyengar",
+      "gender": "m"
     },
     "p3": {
       "name": "Geeta",
@@ -214,7 +241,36 @@
       "partners": [
         "p12",
         "p8"
-      ]
+      ],
+      "married": "1987-03-18"
+    },
+    {
+      "partners": [
+        "p18",
+        "p14"
+      ],
+      "married": "2004-04-18"
+    },
+    {
+      "partners": [
+        "p19",
+        "p13"
+      ],
+      "married": "2009-12-06"
+    },
+    {
+      "partners": [
+        "p20",
+        "p15"
+      ],
+      "married": "2010-02-25"
+    },
+    {
+      "partners": [
+        "p21",
+        "p16"
+      ],
+      "married": "2010-04-17"
     }
   ]
 }
